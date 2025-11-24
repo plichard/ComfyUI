@@ -1,0 +1,30 @@
+{
+  "defaults": {
+    "duration": 5.0,
+    "steps": 4
+  },
+  "clips": [
+    {
+      "name": "establish",
+      "mode": "fl",
+      "first_frame": "test.png",
+      "prompt": "The red-haired woman sitting on the fallen tree slowly lifts her head, brushes a strand of hair back from her face, and looks off to the side.\nNo music, no voices, only quiet jungle ambience and birdsong."
+    },
+    {
+      "name": "turn_back",
+      "mode": "fl",
+      "first_frame": "test.png",
+      "prompt": "The woman keeps looking to the side, then slowly turns her head back towards the camera and settles.\nNo music, no voices, only quiet jungle ambience and birdsong."
+    },
+    {
+      "name": "stand_up",
+      "mode": "ref",
+      "ref_images": [
+        "test.png"
+      ],
+      "duration": 4.0,
+      "prompt": "The woman pushes herself up off the fallen tree and stands, steadying herself on a branch.\nNo music, no voices, only footsteps and rustling leaves.",
+      "ref_image_size": "max"
+    }
+  ]
+}

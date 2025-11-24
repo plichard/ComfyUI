@@ -1,0 +1,550 @@
+{
+  "load_unet": {
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "DiT (INT8 pruned)"
+    },
+    "inputs": {
+      "unet_name": "minimaxH3INT8INT4_fl2vaINT8Pruned.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "attention": {
+    "class_type": "ModelAttentionBackend",
+    "_meta": {
+      "title": "KNOB attention: 'comfy kitchen attention' | 'pytorch attention'"
+    },
+    "inputs": {
+      "model": [
+        "load_unet",
+        0
+      ],
+      "attention": "comfy kitchen attention"
+    }
+  },
+  "turbo_lora": {
+    "class_type": "MiniMaxH3TurboLoRA",
+    "_meta": {
+      "title": "Turbo LoRA (low_vram=false -> bypass, sharper)"
+    },
+    "inputs": {
+      "model": [
+        "attention",
+        0
+      ],
+      "lora_name": "minimax_h3_turbo_v4_step600.safetensors",
+      "strength": 1.0,
+      "low_vram": false
+    }
+  },
+  "load_clip": {
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Text encoder (Qwen3-VL 32B INT4, 14.3 GB)"
+    },
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_int4_convrot.safetensors",
+      "type": "minimax",
+      "device": "default"
+    }
+  },
+  "vae_video": {
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Video VAE"
+    },
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    }
+  },
+  "vae_audio": {
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Audio VAE"
+    },
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    }
+  },
+  "resolution": {
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "KNOB resolution -> width/height for the whole graph"
+    },
+    "inputs": {
+      "aspect_ratio": "3:4 (Portrait Standard)",
+      "megapixels": 0.4,
+      "multiple": 32
+    }
+  },
+  "duration": {
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "KNOB duration in seconds"
+    },
+    "inputs": {
+      "value": 5.0
+    }
+  },
+  "length": {
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "duration -> frame count on the 17k+5 grid"
+    },
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "duration",
+        0
+      ]
+    }
+  },
+  "prompt": {
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "KNOB prompt (feeds whichever branch is active)"
+    },
+    "inputs": {
+      "value": ""
+    }
+  },
+  "use_ref": {
+    "class_type": "BOOLConstant",
+    "_meta": {
+      "title": "KNOB true = REF2VA (reference image), false = FL2VA (first frame)"
+    },
+    "inputs": {
+      "value": true
+    }
+  },
+  "extend": {
+    "class_type": "BOOLConstant",
+    "_meta": {
+      "title": "KNOB false for clip 1, true for clip 2..N"
+    },
+    "inputs": {
+      "value": false
+    }
+  },
+  "ref2va": {
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "REF2VA branch  (KNOB ref_image_size: 'match' is much faster than 'max')"
+    },
+    "inputs": {
+      "clip": [
+        "load_clip",
+        0
+      ],
+      "vae": [
+        "vae_video",
+        0
+      ],
+      "audio_vae": [
+        "vae_audio",
+        0
+      ],
+      "prompt": [
+        "prompt",
+        0
+      ],
+      "width": [
+        "resolution",
+        0
+      ],
+      "height": [
+        "resolution",
+        1
+      ],
+      "length": [
+        "length",
+        1
+      ],
+      "ref_image_size": "max",
+      "ref_images.ref_image_0": [
+        "load_ref0",
+        0
+      ]
+    }
+  },
+  "fl2va": {
+    "class_type": "MiniMaxH3ImageToVideo",
+    "_meta": {
+      "title": "FL2VA branch (first frame)"
+    },
+    "inputs": {
+      "clip": [
+        "load_clip",
+        0
+      ],
+      "vae": [
+        "vae_video",
+        0
+      ],
+      "prompt": [
+        "prompt",
+        0
+      ],
+      "width": [
+        "resolution",
+        0
+      ],
+      "height": [
+        "resolution",
+        1
+      ],
+      "length": [
+        "length",
+        1
+      ],
+      "first_frame": [
+        "scale_first",
+        0
+      ]
+    }
+  },
+  "pick_cond": {
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "use_ref -> conditioning (lazy: only one branch runs)"
+    },
+    "inputs": {
+      "boolean": [
+        "use_ref",
+        0
+      ],
+      "on_true": [
+        "ref2va",
+        0
+      ],
+      "on_false": [
+        "fl2va",
+        0
+      ]
+    }
+  },
+  "pick_latent": {
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "use_ref -> latent"
+    },
+    "inputs": {
+      "boolean": [
+        "use_ref",
+        0
+      ],
+      "on_true": [
+        "ref2va",
+        1
+      ],
+      "on_false": [
+        "fl2va",
+        1
+      ]
+    }
+  },
+  "load_context": {
+    "class_type": "MiniMaxH3MotionContextLoadLatent",
+    "_meta": {
+      "title": "KNOB latent_path=<project> folder, clip_index=PREVIOUS clip (N-1)"
+    },
+    "inputs": {
+      "latent_path": "test_project",
+      "clip_index": 0
+    }
+  },
+  "motion_context": {
+    "class_type": "MiniMaxH3MotionContext",
+    "_meta": {
+      "title": "Pin tail of previous clip (context_length frames come off the front)"
+    },
+    "inputs": {
+      "conditioning": [
+        "pick_cond",
+        0
+      ],
+      "vae": [
+        "vae_video",
+        0
+      ],
+      "latent": [
+        "pick_latent",
+        0
+      ],
+      "context_length": "22",
+      "audio_context_length": 24,
+      "context_latent": [
+        "load_context",
+        0
+      ],
+      "audio_vae": [
+        "vae_audio",
+        0
+      ]
+    }
+  },
+  "cond_final": {
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "extend -> motion context or plain conditioning"
+    },
+    "inputs": {
+      "boolean": [
+        "extend",
+        0
+      ],
+      "on_true": [
+        "motion_context",
+        0
+      ],
+      "on_false": [
+        "pick_cond",
+        0
+      ]
+    }
+  },
+  "noise": {
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "KNOB seed"
+    },
+    "inputs": {
+      "noise_seed": 616064551299798
+    }
+  },
+  "sigmas": {
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "KNOB steps"
+    },
+    "inputs": {
+      "model": [
+        "turbo_lora",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": 4,
+      "denoise": 1.0
+    }
+  },
+  "sampler": {
+    "class_type": "MiniMaxH3TurboSampler",
+    "_meta": {
+      "title": "Turbo sampler"
+    },
+    "inputs": {}
+  },
+  "guider": {
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "Guider"
+    },
+    "inputs": {
+      "model": [
+        "turbo_lora",
+        0
+      ],
+      "conditioning": [
+        "cond_final",
+        0
+      ]
+    }
+  },
+  "ksampler": {
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "Sampler"
+    },
+    "inputs": {
+      "noise": [
+        "noise",
+        0
+      ],
+      "guider": [
+        "guider",
+        0
+      ],
+      "sampler": [
+        "sampler",
+        0
+      ],
+      "sigmas": [
+        "sigmas",
+        0
+      ],
+      "latent_image": [
+        "pick_latent",
+        0
+      ]
+    }
+  },
+  "save_latent": {
+    "class_type": "MiniMaxH3MotionContextSaveLatent",
+    "_meta": {
+      "title": "KNOB filename_prefix=<project>/clip, clip_index=THIS clip (N, must be >0)"
+    },
+    "inputs": {
+      "latent": [
+        "ksampler",
+        0
+      ],
+      "filename_prefix": "test_project/clip",
+      "clip_index": 1
+    }
+  },
+  "decode_video": {
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Decode video"
+    },
+    "inputs": {
+      "samples": [
+        "ksampler",
+        0
+      ],
+      "vae": [
+        "vae_video",
+        0
+      ]
+    }
+  },
+  "decode_audio": {
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "Decode audio"
+    },
+    "inputs": {
+      "samples": [
+        "ksampler",
+        0
+      ],
+      "vae": [
+        "vae_audio",
+        0
+      ]
+    }
+  },
+  "no_trim": {
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "trim_frames when not extending (clip 1)"
+    },
+    "inputs": {
+      "value": 0
+    }
+  },
+  "trim_count": {
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "extend -> encoder's trim_frames, else 0 (keeps motion_context lazy)"
+    },
+    "inputs": {
+      "boolean": [
+        "extend",
+        0
+      ],
+      "on_true": [
+        "motion_context",
+        1
+      ],
+      "on_false": [
+        "no_trim",
+        0
+      ]
+    }
+  },
+  "trim": {
+    "class_type": "MiniMaxH3MotionContextTrim",
+    "_meta": {
+      "title": "Drop pinned head from picture+sound; fps MUST match create_video"
+    },
+    "inputs": {
+      "images": [
+        "decode_video",
+        0
+      ],
+      "trim_frames": [
+        "trim_count",
+        0
+      ],
+      "audio": [
+        "decode_audio",
+        0
+      ],
+      "fps": 24.0,
+      "match_tail": true
+    }
+  },
+  "create_video": {
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "Mux"
+    },
+    "inputs": {
+      "images": [
+        "trim",
+        0
+      ],
+      "audio": [
+        "trim",
+        1
+      ],
+      "fps": 24.0,
+      "bit_depth": 8
+    }
+  },
+  "save_video": {
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "KNOB filename_prefix"
+    },
+    "inputs": {
+      "video": [
+        "create_video",
+        0
+      ],
+      "filename_prefix": "test_project/clip",
+      "format": "auto",
+      "codec": "auto"
+    }
+  },
+  "load_first": {
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "first_frame source (driver-managed)"
+    },
+    "inputs": {
+      "image": "test.png"
+    }
+  },
+  "scale_first": {
+    "class_type": "easy imageScaleDown",
+    "_meta": {
+      "title": "centre-crop first_frame to generation size"
+    },
+    "inputs": {
+      "images": [
+        "load_first",
+        0
+      ],
+      "width": [
+        "resolution",
+        0
+      ],
+      "height": [
+        "resolution",
+        1
+      ],
+      "crop": "center"
+    }
+  },
+  "load_ref0": {
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "ref_image_0 (unscaled - ref2va sizes it itself)"
+    },
+    "inputs": {
+      "image": "test.png"
+    }
+  }
+}

@@ -1,0 +1,133 @@
+# Pinned so the project name (and therefore volume namespacing) does not depend on
+# which path this is invoked from - the repo is reachable via a symlink.
+name: comfyui
+
+services:
+  comfyui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: comfyui-rocm
+    hostname: comfyui-dev
+    # Run as the invoking host user (uid/gid 1000) so workflows, outputs and
+    # __pycache__ written into the bind-mounted workspace stay owned by that user
+    # instead of root.
+    user: "1000:1000"
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    # Numeric host GIDs (video=39, render=105). Group *names* would resolve against
+    # the container's /etc/group, which does not match the host device ownership.
+    group_add:
+      - "39"
+      - "105"
+    ipc: host
+    privileged: true
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp=unconfined
+    shm_size: "16gb"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      # Docker defaults to 1024, which --fast-disk (mmap-backed weights) plus the
+      # custom-node filesystem watchers exhaust -> "OSError: [Errno 24] Too many open files".
+      nofile:
+        soft: 65536
+        hard: 65536
+      stack:
+        soft: 67108864
+        hard: 67108864
+    volumes:
+      - .:/workspace
+      # Writable HOME for the non-root user. Also persists the Triton JIT cache, so
+      # the comfy-kitchen INT8/NVFP4 kernels are compiled once instead of on every
+      # container start.
+      - comfyui-home:/home/comfy
+      # - comfyui-models:/workspace/models
+      # - comfyui-output:/workspace/output
+    ports:
+      - "8188:8188"
+    environment:
+      # HSA_OVERRIDE_GFX_VERSION must NOT be set: gfx1100 is natively supported, and
+      # forcing 11.0.0 makes HIP enumerate zero devices.
+      # Hide the gfx1036 iGPU, which is otherwise enumerated as cuda:1.
+      - HIP_VISIBLE_DEVICES=0
+      # DO NOT re-enable expandable_segments on ROCm/gfx1100. Measured 2026-08-21
+      # over identical runs (H3 fl2va, 0.2MP, 5s, seed 1234):
+      #
+      #                       non-torch VRAM held   vram_free after run   wall
+      #   expandable_segments        18532 MB              2.48 GB        110s
+      #   default allocator            726 MB             23.38 GB         89s
+      #
+      # With it on, torch's reserved_bytes stops accounting for ~19 GB that the
+      # GPU still holds, so model_management sees ~130 MB free and streams every
+      # weight from CPU ("0.00 MB loaded, 19996 MB offloaded"). With it off the
+      # VAEs report "full load: True" and it is ~18% faster. It also never
+      # released memory between runs, which is what caused the OOMs.
+      # Note the OOM message itself suggests turning this ON - ignore that here.
+      # - PYTORCH_ALLOC_CONF=expandable_segments:True
+      # NOTE: COMFY_KITCHEN_DISABLE_HIP=1 was tested and is WORSE here - forcing the
+      # eager backend produced NaN latents (black frames), while HIP produces finite
+      # (if still wrong) output. Leave the HIP backend enabled.
+      - HOME=/home/comfy
+      - TRITON_CACHE_DIR=/home/comfy/.triton/cache
+      - PYTHONUNBUFFERED=1
+      # - HSA_NO_SCRATCH_RECLAIM=1
+    network_mode: host
+    working_dir: /workspace
+    # --enable-triton-backend is only safe while NO nvfp4 model is loaded: comfy-kitchen's
+    # triton NVFP4 kernels contain inline PTX asm ("couldn't allocate ... reg for
+    # constraint 'h'/'r'") and abort the process on gfx1100. With the int4_convrot text
+    # encoder there is no nvfp4 consumer, so triton's int8_linear (verified working on
+    # gfx1100) can serve the INT8 DiT. Revert this flag if an nvfp4 model is ever used.
+    # command: python main.py --listen 0.0.0.0 --use-pytorch-cross-attention --enable-manager --cache-none --reserve-vram 0.6 --fast-disk --bf16-unet --enable-dynamic-vram
+    #command: python main.py --use-pytorch-cross-attention --enable-manager
+    # TESTED 2026-08-21: removing --fast-disk changes the retained VRAM by 2 MB
+    # (18534 vs 18532 MB non-torch), so comfy-aimdo is NOT the thing holding it.
+    # Flag restored.
+    # CACHING, measured 2026-08-21 at 0.2MP. Currently OFF; here is the tradeoff.
+    #
+    # --cache-ram 8 (RAM-pressure caching, headroom floor not a cache size:
+    # ComfyUI evicts node outputs until psutil available RAM >= 8 GB, see
+    # main.py:334 and execution.py:800-806):
+    #   cold 96s -> 38s when ONLY THE SEED changed (2.5x).
+    # That 58s is the 32B text encode, which a seed change does not invalidate.
+    # A PROMPT change does invalidate it, so prompt iteration keeps only the
+    # cached model loaders, not the big win.
+    #
+    # Why it is off: the floor bounds the node-output cache, NOT the CPU-side
+    # model weights, which are a separate pool it cannot evict. A 3-clip chain
+    # reached 51.5 GB RSS (all anon; RssFile 0.0, so --fast-disk was not giving
+    # file-backed pages), drove the box to 0 MB available and 8 GB of swap, and
+    # the GPU sat at 0% busy while it thrashed. 39 GB of models against 60 GB of
+    # RAM is too tight to keep three of them cached.
+    #
+    # Re-enable with --cache-ram 8 (drop --cache-none) for seed-only re-rolls,
+    # but watch RSS on multi-clip chains.
+    # COMFY_EXTRA_ARGS appends flags without editing this file:
+    #   COMFY_EXTRA_ARGS="--reserve-vram 8" docker compose up -d comfyui
+    # Compose interpolates before it splits the string, so a multi-word value
+    # expands into separate argv entries correctly.
+    #
+    # --reserve-vram N is the high-resolution lever. It is added to the load
+    # budget (model_management.py:914), so a bigger reserve keeps LESS of the
+    # DiT resident and leaves more room for activations. Measured 2026-08-21,
+    # 1 MP (896x1184), 4 steps, bypass LoRA:
+    #   reserve 12 -> 3383 MB DiT resident, 57.93 s/it, 486s
+    #   reserve  8 -> 7502 MB DiT resident, 57.87 s/it, 429s
+    # Sampling speed is identical: at 1 MP the DiT is compute-bound, not
+    # streaming-bound, so do not bother tuning below 8. Leave it UNSET for
+    # routine <=0.4 MP work, where the DiT loads completely and runs 14.4 s/it
+    # (streaming it instead costs ~34%).
+    command: python main.py --listen 0.0.0.0 --use-pytorch-cross-attention --enable-manager --cache-none --enable-dynamic-vram ${COMFY_EXTRA_ARGS:-}
+    # command: python -c 'import cv2'
+    stdin_open: true
+    tty: true
+
+volumes:
+  comfyui-home:
+#   comfyui-models:
+#   comfyui-output:
