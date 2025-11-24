@@ -89,6 +89,8 @@ platforms = ["linux-64"]
 ComfyUI = { path = ".", editable = true }
 
 [tool.pixi.tasks]
+start = { cmd = "python main.py --use-pytorch-cross-attention", env = { TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "1" } }
+
 
 
 [tool.pixi.pypi-options]
