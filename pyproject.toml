@@ -1,14 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ComfyUI"
 version = "0.3.76"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
+dynamic = ["dependencies"]
 
 [project.urls]
 homepage = "https://www.comfy.org/"
 repository = "https://github.com/comfyanonymous/ComfyUI"
 documentation = "https://docs.comfy.org/"
+
+[tool.setuptools.packages.find]
+include = ["comfy*", "app*", "api_server*", "middleware*", "alembic_db*"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [tool.ruff]
 lint.select = [
@@ -69,3 +80,17 @@ messages_control.disable = [
   "no-else-return",
   "unused-variable",
 ]
+
+[tool.pixi.project]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.pypi-dependencies]
+ComfyUI = { path = ".", editable = true }
+
+[tool.pixi.tasks]
+
+
+[tool.pixi.pypi-options]
+extra-index-urls = ["https://download.pytorch.org/whl/nightly/rocm7.1"]
+index-strategy = "unsafe-best-match"
