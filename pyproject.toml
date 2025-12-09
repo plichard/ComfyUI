@@ -85,10 +85,15 @@ messages_control.disable = [
 channels = ["conda-forge"]
 platforms = ["linux-64"]
 
+[tool.pixi.dependencies]
+python = "~=3.12.0"
+rocminfo = "*"
+
 [tool.pixi.pypi-dependencies]
 ComfyUI = { path = ".", editable = true }
 
 [tool.pixi.tasks]
+install-custom-nodes = "sh -c 'for req in custom_nodes/*/requirements.txt; do uv pip install -r $req; done'"
 start = { cmd = "python main.py --use-pytorch-cross-attention", env = { TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0" } }
 
 
