@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/ltdrdata/ComfyUI-Manager
+	branch = main
+	commit = 045f91c4113bad8dfee50d0b0a111f44c68a14db
+	parent = 9304e47351be8d178a093b30bcaf5d72c3a2baf5
+	method = rebase
+	cmdver = 0.4.9
