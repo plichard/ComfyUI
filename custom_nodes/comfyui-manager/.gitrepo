@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/ltdrdata/ComfyUI-Manager
 	branch = main
-	commit = 045f91c4113bad8dfee50d0b0a111f44c68a14db
-	parent = 9304e47351be8d178a093b30bcaf5d72c3a2baf5
+	commit = d8e3f531c7348dedd39602cc85a438caf09589e5
+	parent = 7ddb4ed49dc5f7a36ea8e201ad22a13ab7b88673
 	method = rebase
 	cmdver = 0.4.9
